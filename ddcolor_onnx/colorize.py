@@ -99,15 +99,23 @@ def colorize(img: Image.Image, session, size=512, timings=None) -> Image.Image:
     return res
 
 
+def _providers(gpu):
+    import onnxruntime as ort
+    return ort.get_available_providers() if gpu else ["CPUExecutionProvider"]
+
+
 def main():
     import onnxruntime as ort
     p = argparse.ArgumentParser()
     p.add_argument("model"), p.add_argument("input"), p.add_argument("output")
     p.add_argument("--size", type=int, default=512)
+    p.add_argument("--gpu", action="store_true",
+                   help="use CUDA if available. OFF by default: on GB10/Blackwell the fp16 model "
+                        "gave wrong colours on CUDA (greenish, red patches) but correct on CPU")
     a = p.parse_args()
     so = ort.SessionOptions()
     so.log_severity_level = 3  # errors only: fp16 weights trigger harmless constant-folding warnings on CPU
-    sess = ort.InferenceSession(a.model, so, providers=ort.get_available_providers())
+    sess = ort.InferenceSession(a.model, so, providers=_providers(a.gpu))
     colorize(Image.open(a.input), sess, a.size).save(a.output)
 
 

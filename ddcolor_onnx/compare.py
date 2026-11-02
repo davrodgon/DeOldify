@@ -44,7 +44,7 @@ def run_ddcolor(a):
     from colorize import colorize
     so = ort.SessionOptions()
     so.log_severity_level = 3
-    prov = ["CPUExecutionProvider"] if a.cpu else ort.get_available_providers()
+    prov = ort.get_available_providers() if a.gpu else ["CPUExecutionProvider"]
     sess = ort.InferenceSession(a.model, so, providers=prov)
     print("providers:", sess.get_providers())
     out = Path(a.out) / "ddcolor"; out.mkdir(parents=True, exist_ok=True)
@@ -119,7 +119,8 @@ def main():
         s.add_argument("--inputs", required=True)
         s.add_argument("--out", required=True)
     sub.choices["ddcolor"].add_argument("--model", required=True)
-    sub.choices["ddcolor"].add_argument("--cpu", action="store_true", help="force CPU provider")
+    sub.choices["ddcolor"].add_argument("--gpu", action="store_true",
+                 help="use CUDA. Off by default: wrong colours seen on GB10 with the fp16 model")
     d = sub.choices["deoldify"]
     d.add_argument("--root", default=".", help="folder containing models/*.pth")
     d.add_argument("--variant", choices=["artistic", "stable"], default="artistic")
