@@ -68,7 +68,9 @@ def main():
     p.add_argument("model"), p.add_argument("input"), p.add_argument("output")
     p.add_argument("--size", type=int, default=512)
     a = p.parse_args()
-    sess = ort.InferenceSession(a.model, providers=ort.get_available_providers())
+    so = ort.SessionOptions()
+    so.log_severity_level = 3  # errors only: fp16 weights trigger harmless constant-folding warnings on CPU
+    sess = ort.InferenceSession(a.model, so, providers=ort.get_available_providers())
     colorize(Image.open(a.input), sess, a.size).save(a.output)
 
 
