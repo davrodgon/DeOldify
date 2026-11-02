@@ -94,7 +94,8 @@ def colorize(img: Image.Image, session, size=512, timings=None) -> Image.Image:
     b = _resize(ab[1], (w, h))
     res = Image.fromarray(_lab_to_u8(L, a, b))
     if timings is not None:
-        timings.update(pre=t1 - t0, infer=t2 - t1, post=time.perf_counter() - t2)
+        timings.update(pre=t1 - t0, infer=t2 - t1, post=time.perf_counter() - t2,
+                       ab_abs=float(np.abs(ab).mean()), nan=bool(np.isnan(ab).any()))
     return res
 
 

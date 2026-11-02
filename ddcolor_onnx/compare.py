@@ -44,7 +44,8 @@ def run_ddcolor(a):
     from colorize import colorize
     so = ort.SessionOptions()
     so.log_severity_level = 3
-    sess = ort.InferenceSession(a.model, so, providers=ort.get_available_providers())
+    prov = ["CPUExecutionProvider"] if a.cpu else ort.get_available_providers()
+    sess = ort.InferenceSession(a.model, so, providers=prov)
     print("providers:", sess.get_providers())
     out = Path(a.out) / "ddcolor"; out.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -57,7 +58,8 @@ def run_ddcolor(a):
         res.save(out / f"{p.stem}.png")
         rows.append([p.name, *img.size, round(dt, 3)])
         print(f"{p.name} {img.width}x{img.height}: {dt:.2f}s "
-              f"(pre {tm['pre']:.2f} infer {tm['infer']:.2f} post {tm['post']:.2f})")
+              f"(pre {tm['pre']:.2f} infer {tm['infer']:.2f} post {tm['post']:.2f}) "
+              f"mean|ab|={tm['ab_abs']:.2f}{' NaN!' if tm['nan'] else ''}")
     write_timings(a.out, "ddcolor", rows)
 
 
@@ -117,6 +119,7 @@ def main():
         s.add_argument("--inputs", required=True)
         s.add_argument("--out", required=True)
     sub.choices["ddcolor"].add_argument("--model", required=True)
+    sub.choices["ddcolor"].add_argument("--cpu", action="store_true", help="force CPU provider")
     d = sub.choices["deoldify"]
     d.add_argument("--root", default=".", help="folder containing models/*.pth")
     d.add_argument("--variant", choices=["artistic", "stable"], default="artistic")
