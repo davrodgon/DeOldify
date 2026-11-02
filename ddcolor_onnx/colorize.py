@@ -72,22 +72,34 @@ def _lab_to_u8(L, a, b):
     return _ENC[(lin * (_NENC - 1) + 0.5).astype(np.int32)]
 
 
+def _net_input(img, size):
+    """Grayscale RGB network input (1,3,S,S) float32 built from the L of the downscaled image."""
+    small = np.asarray(img.resize((size, size), Image.BICUBIC), dtype=np.float64) / 255.0
+    lab_s = rgb2lab(small)
+    lab_s[..., 1:] = 0
+    return lab2rgb(lab_s).astype(np.float32).transpose(2, 0, 1)[None]
+
+
+def _run(session, gray):
+    inp = session.get_inputs()[0]
+    dtype = np.float16 if "float16" in inp.type else np.float32  # fp16 exports need fp16 input
+    return session.run(None, {inp.name: gray.astype(dtype)})[0][0].astype(np.float32)  # (2,S,S)
+
+
+def predict_ab(img: Image.Image, session, size=512):
+    """Raw network chroma (2,S,S) for an image; reusable for interactive editing."""
+    return _run(session, _net_input(img.convert("RGB"), size))
+
+
 def colorize(img: Image.Image, session, size=512, timings=None) -> Image.Image:
     t0 = time.perf_counter()
     img = img.convert("RGB")
     w, h = img.size
     L = _full_L(np.asarray(img))                       # full-res luminance (kept untouched)
-
-    # network input: L of the downscaled image, rebuilt as grayscale RGB (a=b=0)
-    small = np.asarray(img.resize((size, size), Image.BICUBIC), dtype=np.float64) / 255.0
-    lab_s = rgb2lab(small)
-    lab_s[..., 1:] = 0
-    gray = lab2rgb(lab_s).astype(np.float32).transpose(2, 0, 1)[None]
+    gray = _net_input(img, size)
 
     t1 = time.perf_counter()
-    inp = session.get_inputs()[0]
-    dtype = np.float16 if "float16" in inp.type else np.float32  # fp16 exports need fp16 input
-    ab = session.run(None, {inp.name: gray.astype(dtype)})[0][0].astype(np.float32)  # (2,S,S)
+    ab = _run(session, gray)
 
     t2 = time.perf_counter()
     a = _resize(ab[0], (w, h))
@@ -109,6 +121,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("model"), p.add_argument("input"), p.add_argument("output")
     p.add_argument("--size", type=int, default=512)
+    p.add_argument("--hints", help="JSON hints file (see hints.py), e.g. saved by gui.py")
     p.add_argument("--gpu", action="store_true",
                    help="use CUDA if available. OFF by default: on GB10/Blackwell the fp16 model "
                         "gave wrong colours on CUDA (greenish, red patches) but correct on CPU")
@@ -116,7 +129,12 @@ def main():
     so = ort.SessionOptions()
     so.log_severity_level = 3  # errors only: fp16 weights trigger harmless constant-folding warnings on CPU
     sess = ort.InferenceSession(a.model, so, providers=_providers(a.gpu))
-    colorize(Image.open(a.input), sess, a.size).save(a.output)
+    img = Image.open(a.input)
+    if a.hints:
+        import json, hints
+        hints.colorize_with_hints(img, sess, json.load(open(a.hints)), a.size).save(a.output)
+    else:
+        colorize(img, sess, a.size).save(a.output)
 
 
 if __name__ == "__main__":
