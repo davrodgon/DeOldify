@@ -37,4 +37,15 @@ print("max |dL|:", np.abs(lab_out[..., 0] - L_in).max(),
       "mean ab:", lab_out[..., 1].mean(), lab_out[..., 2].mean())
 assert np.abs(lab_out[..., 0] - L_in).max() < 1.5   # luminance preserved (gamut clipping slack)
 assert lab_out[..., 1].mean() > 10 and lab_out[..., 2].mean() < -5
+
+# fast path vs float64 reference on a random colour image (reference: full Lab pipeline)
+import colorize as C
+rgbimg = Image.fromarray((rng.random((180, 260, 3)) * 255).astype(np.uint8))
+fast = np.asarray(colorize(rgbimg, sess)).astype(int)
+arr = np.asarray(rgbimg) / 255.
+Lref = rgb2lab(arr)[..., 0]
+abf = np.stack([np.full(Lref.shape, 30.), np.full(Lref.shape, -20.)], -1)
+ref = (lab2rgb(np.concatenate([Lref[..., None], abf], -1)) * 255).round().astype(int)
+print("fast vs reference max diff (0-255):", np.abs(fast - ref).max())
+assert np.abs(fast - ref).max() <= 2
 print("OK")

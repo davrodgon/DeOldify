@@ -44,15 +44,45 @@ def _resize(arr2d, size):  # float32 HxW -> size=(w,h)
                       .resize(size, Image.BICUBIC))
 
 
+# --- fast full-resolution path: LUTs + float32 (the network only sees 512x512) ---
+_DEC = np.arange(256) / 255.0
+_DEC = np.where(_DEC > 0.04045, ((_DEC + 0.055) / 1.055) ** 2.4, _DEC / 12.92).astype(np.float32)
+_NENC = 16384
+_x = np.linspace(0, 1, _NENC)
+_ENC = np.round(np.where(_x > 0.0031308, 1.055 * _x ** (1 / 2.4) - 0.055, 12.92 * _x) * 255).astype(np.uint8)
+_YROW = _M[1].astype(np.float32)
+_MINV = np.linalg.inv(_M).T.astype(np.float32)
+_WH = _WHITE.astype(np.float32)
+_EPS, _KAP = 216 / 24389, 24389 / 27
+
+
+def _full_L(rgb_u8):
+    """L channel (0..100) of an HxWx3 uint8 image, float32, without the full Lab transform."""
+    y = _DEC[rgb_u8] @ _YROW
+    f = np.where(y > _EPS, np.cbrt(y), (_KAP * y + 16) / 116).astype(np.float32)
+    return 116 * f - 16
+
+
+def _lab_to_u8(L, a, b):
+    fy = (L + 16) / 116
+    f = np.stack([fy + a / 500, fy, fy - b / 200], -1)
+    f3 = f * f * f
+    xyz = np.where(f3 > _EPS, f3, (116 * f - 16) / _KAP) * _WH
+    lin = np.clip(xyz @ _MINV, 0, 1)
+    return _ENC[(lin * (_NENC - 1) + 0.5).astype(np.int32)]
+
+
 def colorize(img: Image.Image, session, size=512, timings=None) -> Image.Image:
     t0 = time.perf_counter()
-    rgb = np.asarray(img.convert("RGB"), dtype=np.float64) / 255.0
-    h, w = rgb.shape[:2]
-    L = rgb2lab(rgb)[..., 0]
+    img = img.convert("RGB")
+    w, h = img.size
+    L = _full_L(np.asarray(img))                       # full-res luminance (kept untouched)
 
-    small = np.stack([_resize(L, (size, size)),
-                      np.zeros((size, size)), np.zeros((size, size))], -1)
-    gray = lab2rgb(small).astype(np.float32).transpose(2, 0, 1)[None]
+    # network input: L of the downscaled image, rebuilt as grayscale RGB (a=b=0)
+    small = np.asarray(img.resize((size, size), Image.BICUBIC), dtype=np.float64) / 255.0
+    lab_s = rgb2lab(small)
+    lab_s[..., 1:] = 0
+    gray = lab2rgb(lab_s).astype(np.float32).transpose(2, 0, 1)[None]
 
     t1 = time.perf_counter()
     inp = session.get_inputs()[0]
@@ -60,9 +90,9 @@ def colorize(img: Image.Image, session, size=512, timings=None) -> Image.Image:
     ab = session.run(None, {inp.name: gray.astype(dtype)})[0][0].astype(np.float32)  # (2,S,S)
 
     t2 = time.perf_counter()
-    ab_full = np.stack([_resize(ab[0], (w, h)), _resize(ab[1], (w, h))], -1)
-    out = lab2rgb(np.concatenate([L[..., None], ab_full], -1))
-    res = Image.fromarray((out * 255).round().astype(np.uint8))
+    a = _resize(ab[0], (w, h))
+    b = _resize(ab[1], (w, h))
+    res = Image.fromarray(_lab_to_u8(L, a, b))
     if timings is not None:
         timings.update(pre=t1 - t0, infer=t2 - t1, post=time.perf_counter() - t2)
     return res
