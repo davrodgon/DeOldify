@@ -51,11 +51,13 @@ def run_ddcolor(a):
     for p in list_images(a.inputs):
         img = to_gray(p)
         t = time.perf_counter()
-        res = colorize(img, sess)
+        tm = {}
+        res = colorize(img, sess, timings=tm)
         dt = time.perf_counter() - t
         res.save(out / f"{p.stem}.png")
         rows.append([p.name, *img.size, round(dt, 3)])
-        print(f"{p.name}: {dt:.2f}s")
+        print(f"{p.name} {img.width}x{img.height}: {dt:.2f}s "
+              f"(pre {tm['pre']:.2f} infer {tm['infer']:.2f} post {tm['post']:.2f})")
     write_timings(a.out, "ddcolor", rows)
 
 

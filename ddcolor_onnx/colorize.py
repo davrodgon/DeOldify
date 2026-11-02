@@ -11,7 +11,7 @@ ASSUMPTIONS (verify against the real ONNX file):
   * input  (1,3,S,S) float32, RGB in [0,1], S = 512
   * output (1,2,S,S) float32, Lab a/b channels in Lab units (~[-128,127])
 """
-import argparse
+import argparse, time
 import numpy as np
 from PIL import Image
 
@@ -44,7 +44,8 @@ def _resize(arr2d, size):  # float32 HxW -> size=(w,h)
                       .resize(size, Image.BICUBIC))
 
 
-def colorize(img: Image.Image, session, size=512) -> Image.Image:
+def colorize(img: Image.Image, session, size=512, timings=None) -> Image.Image:
+    t0 = time.perf_counter()
     rgb = np.asarray(img.convert("RGB"), dtype=np.float64) / 255.0
     h, w = rgb.shape[:2]
     L = rgb2lab(rgb)[..., 0]
@@ -53,13 +54,18 @@ def colorize(img: Image.Image, session, size=512) -> Image.Image:
                       np.zeros((size, size)), np.zeros((size, size))], -1)
     gray = lab2rgb(small).astype(np.float32).transpose(2, 0, 1)[None]
 
+    t1 = time.perf_counter()
     inp = session.get_inputs()[0]
     dtype = np.float16 if "float16" in inp.type else np.float32  # fp16 exports need fp16 input
     ab = session.run(None, {inp.name: gray.astype(dtype)})[0][0].astype(np.float32)  # (2,S,S)
 
+    t2 = time.perf_counter()
     ab_full = np.stack([_resize(ab[0], (w, h)), _resize(ab[1], (w, h))], -1)
     out = lab2rgb(np.concatenate([L[..., None], ab_full], -1))
-    return Image.fromarray((out * 255).round().astype(np.uint8))
+    res = Image.fromarray((out * 255).round().astype(np.uint8))
+    if timings is not None:
+        timings.update(pre=t1 - t0, infer=t2 - t1, post=time.perf_counter() - t2)
+    return res
 
 
 def main():
