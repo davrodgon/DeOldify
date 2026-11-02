@@ -53,8 +53,9 @@ def colorize(img: Image.Image, session, size=512) -> Image.Image:
                       np.zeros((size, size)), np.zeros((size, size))], -1)
     gray = lab2rgb(small).astype(np.float32).transpose(2, 0, 1)[None]
 
-    name = session.get_inputs()[0].name
-    ab = session.run(None, {name: gray})[0][0]  # (2,S,S)
+    inp = session.get_inputs()[0]
+    dtype = np.float16 if "float16" in inp.type else np.float32  # fp16 exports need fp16 input
+    ab = session.run(None, {inp.name: gray.astype(dtype)})[0][0].astype(np.float32)  # (2,S,S)
 
     ab_full = np.stack([_resize(ab[0], (w, h)), _resize(ab[1], (w, h))], -1)
     out = lab2rgb(np.concatenate([L[..., None], ab_full], -1))
